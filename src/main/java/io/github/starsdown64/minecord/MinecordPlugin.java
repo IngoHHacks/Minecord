@@ -6,6 +6,8 @@ import io.github.starsdown64.minecord.api.ExternalMessageEvent;
 import io.github.starsdown64.minecord.command.CommandMinecordOff;
 import io.github.starsdown64.minecord.command.CommandMinecordOn;
 import io.github.starsdown64.minecord.listeners.SuperVanishListener;
+import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
+import net.dv8tion.jda.api.entities.channel.middleman.MessageChannel;
 import net.dv8tion.jda.api.utils.MarkdownSanitizer;
 import org.bukkit.ChatColor;
 import org.bukkit.configuration.file.FileConfiguration;
@@ -38,6 +40,8 @@ public class MinecordPlugin extends JavaPlugin implements Listener
     private final boolean noJoinQuitMessages = config.getBoolean("noJoinQuitMessages");
     private final boolean noAdvancementMessages = config.getBoolean("noAdvancementMessages");
     private final boolean allowExternalMessages = config.getBoolean("allowExternalMessages");
+
+    final boolean enableMultiChannelSync = config.getBoolean("enableMultiChannelSync");
     private final long historyAmount = config.getLong("historyAmount");
     private DiscordSlave slave;
     private boolean running = true;
@@ -112,8 +116,20 @@ public class MinecordPlugin extends JavaPlugin implements Listener
                                 break;
                             message = listD2M.removeFirst();
                         }
-                        if (integrate)
-                            getServer().broadcastMessage(message);
+                        if (integrate) {
+                            if (slave.channelIDs.size() > 1 && enableMultiChannelSync) {
+                                String originalChannelID = message.split(":",2)[0];
+                                String messageToSend = message.split(":",2)[1];
+                                for (TextChannel channel : slave.channels) {
+                                    if (!channel.getId().equals(originalChannelID)) {
+                                        channel.sendMessage(messageToSend).queue();
+                                    }
+                                }
+                                getServer().broadcastMessage(messageToSend);
+                            } else {
+                                getServer().broadcastMessage(message);
+                            }
+                        }
                     }
                 }
                 synchronized (syncListM2D)
@@ -238,7 +254,6 @@ public class MinecordPlugin extends JavaPlugin implements Listener
             syncSleep.notify();
         }
     }
-
     public final String getFormattedTabMenu()
     {
         StringBuilder output = new StringBuilder("**Players Online:**\n```\n");

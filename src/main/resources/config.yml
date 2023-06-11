@@ -34,3 +34,6 @@ allowExternalCommandHandling: true
 
 # Whether to show the display name instead of the username for Discord -> Minecraft messages
 useDisplayName: false
+
+# Whether to synchronize messages between all Discord messages between connected channels
+enableMultiChannelSync: true

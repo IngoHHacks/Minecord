@@ -27,14 +27,13 @@ public class DiscordSlave extends ListenerAdapter
 {
     private final MinecordPlugin master;
     private final String token;
-    private final List<String> channelIDs;
+    final List<String> channelIDs;
     private final String prefix;
     private final ArrayList<String> minecordIntegrationToggle;
     private final boolean emptyNewlineTruncation;
     private final boolean allowExternalCommandHandling;
-
     private final boolean showDisplayName;
-    private final List<TextChannel> channels = new LinkedList<>();
+    final List<TextChannel> channels = new LinkedList<>();
     private JDA discord;
 
     public DiscordSlave(MinecordPlugin master)
@@ -173,7 +172,11 @@ public class DiscordSlave extends ListenerAdapter
             content = String.join("\n", contentList);
         }
         content = content.replaceAll("\n", "\n<@" + author + "> ");
-        master.printToMinecraft("<@" + author + "> " + content);
+        if (channelIDs.size() > 1 && master.enableMultiChannelSync) {
+            master.printToMinecraft(message.getChannel().getId() + "|" + "<@" + author + "> " + content);
+        } else {
+            master.printToMinecraft("<@" + author + "> " + content);
+        }
     }
 
     @Override
