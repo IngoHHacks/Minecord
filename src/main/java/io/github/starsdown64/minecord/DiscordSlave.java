@@ -173,7 +173,7 @@ public class DiscordSlave extends ListenerAdapter
         }
         content = content.replaceAll("\n", "\n<@" + author + "> ");
         if (channelIDs.size() > 1 && master.enableMultiChannelSync) {
-            master.printToMinecraft(message.getChannel().getId() + "|" + "<@" + author + "> " + content);
+            master.printToMinecraft(message.getChannel().getId() + ":" + "<@" + author + "> " + content);
         } else {
             master.printToMinecraft("<@" + author + "> " + content);
         }
