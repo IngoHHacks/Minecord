@@ -6,10 +6,16 @@ import io.github.starsdown64.minecord.api.ExternalMessageEvent;
 import io.github.starsdown64.minecord.command.CommandMinecordOff;
 import io.github.starsdown64.minecord.command.CommandMinecordOn;
 import io.github.starsdown64.minecord.listeners.SuperVanishListener;
+import net.dv8tion.jda.api.entities.Message;
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
 import net.dv8tion.jda.api.entities.channel.middleman.MessageChannel;
+import net.dv8tion.jda.api.utils.FileUpload;
 import net.dv8tion.jda.api.utils.MarkdownSanitizer;
+import net.dv8tion.jda.api.utils.messages.MessageCreateBuilder;
+import net.minecraft.util.Tuple;
+import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
+import org.bukkit.OfflinePlayer;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.craftbukkit.v1_20_R1.advancement.CraftAdvancement;
 import org.bukkit.entity.Player;
@@ -18,6 +24,7 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.player.*;
+import org.bukkit.event.server.BroadcastMessageEvent;
 import org.bukkit.event.server.RemoteServerCommandEvent;
 import org.bukkit.event.server.ServerCommandEvent;
 import org.bukkit.metadata.MetadataValue;
@@ -25,6 +32,8 @@ import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scoreboard.Team;
 
 import javax.security.auth.login.LoginException;
+import java.io.InputStream;
+import java.net.URL;
 import java.util.LinkedList;
 import java.util.Locale;
 
@@ -35,11 +44,12 @@ public class MinecordPlugin extends JavaPlugin implements Listener
     private final Object syncListM2D = new Object();
     private final Object syncListD2M = new Object();
     private final LinkedList<String> listM2D = new LinkedList<>();
-    private final LinkedList<String> listD2M = new LinkedList<>();
+    private final LinkedList<Tuple<String, Message>> listD2M = new LinkedList<>();
     private final boolean noDeathMessages = config.getBoolean("noDeathMessages");
     private final boolean noJoinQuitMessages = config.getBoolean("noJoinQuitMessages");
     private final boolean noAdvancementMessages = config.getBoolean("noAdvancementMessages");
     private final boolean allowExternalMessages = config.getBoolean("allowExternalMessages");
+    private final boolean allowBroadcasts = config.getBoolean("allowBroadcasts");
 
     final boolean enableMultiChannelSync = config.getBoolean("enableMultiChannelSync");
     private final long historyAmount = config.getLong("historyAmount");
@@ -78,6 +88,7 @@ public class MinecordPlugin extends JavaPlugin implements Listener
                 }
 
                 String message;
+                Tuple<String, Message> message2;
                 OUTER: while (true)
                 {
                     synchronized (syncSleep)
@@ -114,20 +125,32 @@ public class MinecordPlugin extends JavaPlugin implements Listener
                         {
                             if (listD2M.isEmpty())
                                 break;
-                            message = listD2M.removeFirst();
+                            message2 = listD2M.removeFirst();
                         }
                         if (integrate) {
                             if (slave.channelIDs.size() > 1 && enableMultiChannelSync) {
-                                String originalChannelID = message.split(":",2)[0];
-                                String messageToSend = message.split(":",2)[1];
+                                String originalChannelID = message2.b().getChannel().getId();
+                                String messageToSend = message2.a();
                                 for (TextChannel channel : slave.channels) {
                                     if (!channel.getId().equals(originalChannelID)) {
-                                        channel.sendMessage(messageToSend).queue();
+                                        MessageCreateBuilder builder = new MessageCreateBuilder();
+                                        LinkedList<FileUpload> files = new LinkedList<>();
+                                        for (Message.Attachment attachment : message2.b().getAttachments()) {
+                                            try {
+                                                InputStream in = new URL(attachment.getUrl()).openStream();
+                                                files.add(FileUpload.fromData(in, attachment.getFileName()));
+                                            } catch (Exception exception) {
+                                                exception.printStackTrace();
+                                            }
+                                        }
+                                        builder.setContent(messageToSend);
+                                        builder.setFiles(files);
+                                        channel.sendMessage(builder.build()).queue();
                                     }
                                 }
                                 getServer().broadcastMessage(messageToSend);
                             } else {
-                                getServer().broadcastMessage(message);
+                                getServer().broadcastMessage(message2.a());
                             }
                         }
                     }
@@ -202,13 +225,13 @@ public class MinecordPlugin extends JavaPlugin implements Listener
         return config;
     }
 
-    public final void printToMinecraft(String message)
+    public final void printToMinecraft(String message, Message messageObj)
     {
         synchronized (syncSleep)
         {
             synchronized (syncListD2M)
             {
-                listD2M.addLast(message);
+                listD2M.addLast(new Tuple<>(message, messageObj));
             }
             update = true;
             syncSleep.notify();
@@ -555,4 +578,57 @@ public class MinecordPlugin extends JavaPlugin implements Listener
             return;
         printToDiscord(event.getMessage());
     }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public final void onBroadcast(BroadcastMessageEvent event)
+    {
+        if (!allowBroadcasts || event.getMessage().startsWith("<@"))
+            return;
+        printToDiscord(event.getMessage());
+    }
+
+    public void tryWhitelist(long channelId, long userId, String discordName, String content) {
+        WhitelistThread t = new WhitelistThread(channelId, userId, discordName, content);
+        Bukkit.getScheduler().runTaskAsynchronously(this, t);
+    }
+
+    class WhitelistThread implements Runnable {
+        long channelId;
+
+        long userId;
+
+        String discordName;
+
+        String ign;
+
+        public WhitelistThread(long channelId, long userId, String discordName, String ign) {
+            this.channelId = channelId;
+            this.userId = userId;
+            this.discordName = discordName;
+            this.ign = ign;
+        }
+
+        public void run() {
+            try {
+                URL url = new URL("https://api.mojang.com/users/profiles/minecraft/" + this.ign);
+                InputStream in = url.openStream();
+                if (in.available() > 0) {
+                    OfflinePlayer player = Bukkit.getOfflinePlayer(this.ign);
+                    if (player.isWhitelisted()) {
+                        MinecordPlugin.this.slave.temporaryMessageTo(this.channelId, this.userId, "You are already whitelisted!");
+                    } else {
+                        player.setWhitelisted(true);
+                        WhitelistLog.log("User " + this.discordName + " (" + this.userId + ") has been whitelisted as " + this.ign + ".");
+                        MinecordPlugin.this.slave.temporaryMessageTo(this.channelId, this.userId, "You have been whitelisted!");
+                    }
+                } else {
+                    MinecordPlugin.this.slave.temporaryMessageTo(this.channelId, this.userId, "The username you provided does not exist!");
+                }
+                in.close();
+            } catch (Exception e) {
+                MinecordPlugin.this.slave.temporaryMessageTo(this.channelId, this.userId, "The username you provided does not exist!");
+            }
+        }
+    }
+
 }

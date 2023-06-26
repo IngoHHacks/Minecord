@@ -29,6 +29,9 @@ noAdvancementMessages: false
 # Allows other plugins to send messages to Discord
 allowExternalMessages: true
 
+# Allows broadcasts to be sent to Discord
+allowBroadcasts: true
+
 # Allows other plugins to handle unrecognized commands in Discord
 allowExternalCommandHandling: true
 

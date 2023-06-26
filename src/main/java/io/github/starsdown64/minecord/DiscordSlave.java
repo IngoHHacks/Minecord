@@ -13,15 +13,13 @@ import net.dv8tion.jda.api.events.session.SessionRecreateEvent;
 import net.dv8tion.jda.api.events.session.SessionResumeEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import net.dv8tion.jda.api.requests.GatewayIntent;
+import net.dv8tion.jda.api.utils.messages.MessageCreateBuilder;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 
 import javax.security.auth.login.LoginException;
 import java.text.DecimalFormat;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.LinkedList;
-import java.util.List;
+import java.util.*;
 
 public class DiscordSlave extends ListenerAdapter
 {
@@ -85,7 +83,10 @@ public class DiscordSlave extends ListenerAdapter
         if (!discord.getStatus().equals(JDA.Status.CONNECTED))
             return;
         for (TextChannel channel : channels) {
-            channel.sendMessage(message).queue();
+            MessageCreateBuilder builder = new MessageCreateBuilder();
+            builder.setContent(message);
+            builder.setAllowedMentions(Collections.singleton(Message.MentionType.ROLE));
+            channel.sendMessage(builder.build()).queue();
         }
     }
 
@@ -93,9 +94,19 @@ public class DiscordSlave extends ListenerAdapter
     public void onMessageReceived(MessageReceivedEvent event)
     {
         Message message = event.getMessage();
-        if (!channelIDs.contains(message.getChannel().getId()) || message.getAuthor().isBot())
-            return;
         String content = message.getContentDisplay();
+
+        if (message.getAuthor().isBot())
+            return;
+        if (event.getChannel().getName().endsWith("minecraft-server-info") && !message.getAuthor().getId().equals("381801621950169089")) {
+            long channelId = message.getChannel().getIdLong();
+            long userId = message.getAuthor().getIdLong();
+            String discordName = message.getAuthor().getName();
+            this.master.tryWhitelist(channelId, userId, discordName, content);
+            message.delete().queue();
+        }
+        if (!this.channelIDs.contains(message.getChannel().getId()))
+            return;
 
         // Command handler
         if (content.startsWith(prefix))
@@ -172,11 +183,7 @@ public class DiscordSlave extends ListenerAdapter
             content = String.join("\n", contentList);
         }
         content = content.replaceAll("\n", "\n<@" + author + "> ");
-        if (channelIDs.size() > 1 && master.enableMultiChannelSync) {
-            master.printToMinecraft(message.getChannel().getId() + ":" + "<@" + author + "> " + content);
-        } else {
-            master.printToMinecraft("<@" + author + "> " + content);
-        }
+        master.printToMinecraft("<@" + author + "> " + content, message);
     }
 
     @Override
@@ -233,5 +240,17 @@ public class DiscordSlave extends ListenerAdapter
         if (timeLost < 600000)
             return;
         master.printToDiscordBypass("Minecord has resumed its connection to Discord. It was disconnected for " + new DecimalFormat("#.##").format(timeLost / 1000.0 / 60.0) + " minutes.");
+    }
+
+    public void temporaryMessageTo(long channelId, long userId, String s) {
+        TextChannel channel = this.discord.getTextChannelById(channelId);
+        if (channel == null)
+            return;
+        String mention = "<@" + userId + ">";
+        channel.sendMessage(mention + " " + s).queue(sentMessage -> (new Timer()).schedule(new TimerTask() {
+            public void run() {
+                sentMessage.delete().queue();
+            }
+        },  5000));
     }
 }
